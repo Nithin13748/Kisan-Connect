@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>User Manager</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1b1f24;
+      --muted: #667085;
+      --border: #e2e5ea;
+      --accent: #2563eb;
+      --accent-text: #ffffff;
+      --danger: #dc2626;
+      --ok: #15803d;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115;
+        --card: #181b21;
+        --text: #e8eaee;
+        --muted: #9aa3b2;
+        --border: #2a2f38;
+        --accent: #4f8cff;
+        --accent-text: #0b1220;
+        --danger: #f87171;
+        --ok: #4ade80;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    .sub { margin: 0 0 24px; color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    h2 { margin: 0 0 14px; font-size: 1.05rem; }
+    form { display: grid; gap: 12px; grid-template-columns: 1fr 1fr auto; align-items: end; }
+    label { display: grid; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+    input {
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      width: 100%;
+    }
+    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 9px 14px;
+    }
+    button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+    button.danger { color: var(--danger); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    #message { min-height: 1.4em; margin: 10px 0 0; font-size: 0.9rem; }
+    #message.error { color: var(--danger); }
+    #message.ok { color: var(--ok); }
+    .list-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .count { color: var(--muted); font-size: 0.9rem; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-top: 1px solid var(--border);
+    }
+    li:first-child { border-top: none; }
+    .info { min-width: 0; flex: 1; }
+    .info strong { display: block; overflow-wrap: anywhere; }
+    .info span { color: var(--muted); font-size: 0.9rem; overflow-wrap: anywhere; }
+    .edit-fields { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; flex: 1; }
+    .actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .empty { color: var(--muted); padding: 12px 0; }
+    .pager { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 14px; }
+    @media (max-width: 600px) {
+      form { grid-template-columns: 1fr; }
+      li { flex-direction: column; align-items: stretch; }
+      .edit-fields { grid-template-columns: 1fr; }
+      .actions { justify-content: flex-end; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>User Manager</h1>
+    <p class="sub">A simple website powered by Express and MongoDB.</p>
+
+    <section class="card">
+      <h2>Add a user</h2>
+      <form id="add-form">
+        <label>Name
+          <input id="name" type="text" placeholder="Asha Rao" required />
+        </label>
+        <label>Email
+          <input id="email" type="email" placeholder="asha@example.com" required />
+        </label>
+        <button class="primary" type="submit" id="add-btn">Add user</button>
+      </form>
+      <p id="message" role="status"></p>
+    </section>
+
+    <section class="card">
+      <div class="list-head">
+        <h2>Users</h2>
+        <span class="count" id="count"></span>
+      </div>
+      <ul id="list"></ul>
+      <div class="pager">
+        <button id="prev">Previous</button>
+        <span id="page-label"></span>
+        <button id="next">Next</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const LIMIT = 10;
+    let page = 1;
+    let total = 0;
+    let editingId = null;
+
+    const $ = (id) => document.getElementById(id);
+    const list = $("list");
+    const msg = $("message");
+
+    function say(text, type) {
+      msg.textContent = text || "";
+      msg.className = type || "";
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      if (res.status === 204) return null;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Something went wrong");
+      return data;
+    }
+
+    function el(tag, props = {}, children = []) {
+      const node = document.createElement(tag);
+      Object.assign(node, props);
+      for (const c of [].concat(children)) {
+        node.append(c);
+      }
+      return node;
+    }
+
+    function renderRow(user) {
+      const li = el("li");
+
+      if (editingId === user._id) {
+        const name = el("input", { value: user.name, type: "text" });
+        const email = el("input", { value: user.email, type: "email" });
+        const save = el("button", { textContent: "Save", className: "primary" });
+        const cancel = el("button", { textContent: "Cancel" });
+
+        save.onclick = async () => {
+          try {
+            await api(`/users/${user._id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ name: name.value, email: email.value }),
+            });
+            editingId = null;
+            say("User updated.", "ok");
+            load();
+          } catch (e) {
+            say(e.message, "error");
+          }
+        };
+        cancel.onclick = () => { editingId = null; load(); };
+
+        li.append(
+          el("div", { className: "edit-fields" }, [name, email]),
+          el("div", { className: "actions" }, [save, cancel])
+        );
+        return li;
+      }
+
+      const edit = el("button", { textContent: "Edit" });
+      const del = el("button", { textContent: "Delete", className: "danger" });
+
+      edit.onclick = () => { editingId = user._id; load(); };
+      del.onclick = async () => {
+        if (!confirm(`Delete ${user.name}?`)) return;
+        try {
+          await api(`/users/${user._id}`, { method: "DELETE" });
+          say("User deleted.", "ok");
+          if (list.children.length === 1 && page > 1) page--;
+          load();
+        } catch (e) {
+          say(e.message, "error");
+        }
+      };
+
+      li.append(
+        el("div", { className: "info" }, [
+          el("strong", { textContent: user.name }),
+          el("span", { textContent: user.email }),
+        ]),
+        el("div", { className: "actions" }, [edit, del])
+      );
+      return li;
+    }
+
+    async function load() {
+      try {
+        const data = await api(`/users?page=${page}&limit=${LIMIT}`);
+        total = data.total;
+        list.replaceChildren();
+
+        if (data.items.length === 0) {
+          list.append(el("li", { className: "empty", textContent: "No users yet. Add the first one above." }));
+        } else {
+          data.items.forEach((u) => list.append(renderRow(u)));
+        }
+
+        const pages = Math.max(Math.ceil(total / LIMIT), 1);
+        $("count").textContent = `${total} total`;
+        $("page-label").textContent = `Page ${page} of ${pages}`;
+        $("prev").disabled = page <= 1;
+        $("next").disabled = page >= pages;
+      } catch (e) {
+        say("Could not load users: " + e.message, "error");
+      }
+    }
+
+    $("add-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const btn = $("add-btn");
+      btn.disabled = true;
+      try {
+        await api("/users", {
+          method: "POST",
+          body: JSON.stringify({ name: $("name").value, email: $("email").value }),
+        });
+        $("add-form").reset();
+        page = 1;
+        say("User added.", "ok");
+        load();
+      } catch (e) {
+        say(e.message, "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    $("prev").onclick = () => { page--; load(); };
+    $("next").onclick = () => { page++; load(); };
+
+    load();
+  </script>
+</body>
+</html>
